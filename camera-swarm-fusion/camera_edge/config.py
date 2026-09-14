@@ -58,6 +58,9 @@ class EdgeAgentConfig:
     stop_session_on_exit: bool
     use_frame_stream: bool
     poll_interval_s: float
+    save_frames: bool
+    save_annotated: bool
+    session_root: str
 
     @classmethod
     def from_env(cls) -> "EdgeAgentConfig":
@@ -88,4 +91,7 @@ class EdgeAgentConfig:
             stop_session_on_exit=_env_flag("CAMERA_STOP_SESSION_ON_EXIT", False),
             use_frame_stream=_env_flag("CAMERA_USE_FRAME_STREAM", True),
             poll_interval_s=float(os.getenv("CAMERA_POLL_INTERVAL_S", "0.05")),
+            save_frames=_env_flag("CAMERA_SAVE_FRAMES", True),
+            save_annotated=_env_flag("CAMERA_SAVE_ANNOTATED", True),
+            session_root=os.getenv("CAMERA_SESSION_ROOT", "/app/data/sessions"),
         )

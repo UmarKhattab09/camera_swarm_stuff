@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 import signal
 import time
@@ -10,9 +11,16 @@ import numpy as np
 from camera_fusion.detect import build_detector, detect_markers
 from camera_fusion.output import CsvOutput, MqttOutput
 from iiot_pipeline.services.calib import load_calib
+from iiot_pipeline.services.storage import SessionStorage
 from iiot_pipeline.strategies.localize_pnp import PnPLocalize
 
 from .config import EdgeAgentConfig
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
+logger = logging.getLogger("camera_edge")
 from .health import EdgeHealthTracker
 from .service_client import LocalCameraServiceClient, ServiceError
 
@@ -49,6 +57,12 @@ class EdgeAgent:
 
     def run(self) -> None:
         self.install_signal_handlers()
+        logger.info(
+            "starting camera_edge camera_name=%s device_id=%s broker=%s:%s calibration=%s",
+            self.config.camera_name, self.config.device_id,
+            self.config.mqtt_broker_ip, self.config.mqtt_broker_port,
+            self.config.calibration_path,
+        )
 
         csv_output = CsvOutput()
         mqtt_output = MqttOutput(
@@ -59,10 +73,23 @@ class EdgeAgent:
             camera_name=self.config.camera_name,
         )
 
-        session_dir = Path(self.config.csv_path).parent if self.config.csv_path else Path("/app/data")
-        session_dir.mkdir(parents=True, exist_ok=True)
-        if self.config.csv_path:
-            csv_output.filename = Path(self.config.csv_path).name
+        storage = SessionStorage(self.config.session_root, name=f"{self.config.camera_name}_session")
+        session_dir = Path(storage.begin())
+        self._frames_dir = storage.frames_dir
+        self._storage = storage
+        logger.info("session directory: %s", session_dir)
+
+        storage.write_manifest({
+            "camera_name": self.config.camera_name,
+            "device_id": self.config.device_id,
+            "calibration_path": self.config.calibration_path,
+            "marker_length_m": self.config.marker_length_m,
+            "aruco_dict": self.config.aruco_dict,
+            "fps": self.config.fps,
+            "width": self.config.width,
+            "height": self.config.height,
+            "session_id": self.config.session_id,
+        })
 
         csv_output.open(session_dir)
         mqtt_output.open(session_dir)
@@ -79,9 +106,11 @@ class EdgeAgent:
                     else:
                         self._poll_latest(csv_output, mqtt_output)
                 except ServiceError as error:
+                    logger.warning("service error: %s %s", error.code, error.message)
                     self.health.update(state="degraded", error_code=error.code, error_message=error.message)
                     time.sleep(self.config.reconnect_delay_s)
                 except Exception as error:
+                    logger.exception("unexpected failure in edge loop")
                     self.health.update(state="degraded", error_code="EDGE_FAILURE", error_message=str(error))
                     time.sleep(self.config.reconnect_delay_s)
         finally:
@@ -117,9 +146,11 @@ class EdgeAgent:
             self.client.start_session(
                 self.config.session_id, self.config.fps, self.config.width, self.config.height
             )
+            logger.info("session started: %s", self.config.session_id)
         except ServiceError as error:
             if error.code != "SESSION_ALREADY_ACTIVE":
                 raise
+            logger.info("session already active: %s", self.config.session_id)
 
     def _consume_stream(self, csv_output: CsvOutput, mqtt_output: MqttOutput) -> None:
         with self.client.stream() as stream:
@@ -162,6 +193,46 @@ class EdgeAgent:
         capture_time = sample["capture_time_ms"] / 1000.0
         ts_unix = time.time()
 
+        image_path = None
+        if self.config.save_frames:
+            frame_filename = f"f{sample['frame_idx']:06d}.jpg"
+            frame_path = self._frames_dir / frame_filename
+            cv2.imwrite(str(frame_path), image)
+            try:
+                image_path = str(frame_path.relative_to("/app"))
+            except ValueError:
+                image_path = str(frame_path)
+
+        if dets and self.config.save_annotated:
+            draw = image.copy()
+            h, w = draw.shape[:2]
+            ts_iso = time.strftime("%Y-%m-%dT%H:%M:%S")
+            txt = f"#{sample['frame_idx']} {ts_iso} {w}x{h}"
+            cv2.putText(draw, txt, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2, cv2.LINE_AA)
+
+            for det in dets:
+                color = (0, 255, 0)  # green -- camera_edge has no LightGlue fallback, always aruco source
+                corners_int = det.corners.astype(np.int32)
+                cv2.polylines(draw, [corners_int], True, color, 2)
+                center = corners_int.reshape(-1, 2).mean(axis=0)
+                org = (int(center[0]), int(center[1]))
+                cv2.putText(draw, str(det.marker_id), org, cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2, cv2.LINE_AA)
+
+            for det in dets:
+                pose = pose_map.get(det.marker_id)
+                if pose is None:
+                    continue
+                try:
+                    cv2.drawFrameAxes(
+                        draw, self._localize.K, self._localize.dist,
+                        pose.rvec, pose.tvec,
+                        max(0.01, self.config.marker_length_m * 0.5),
+                    )
+                except Exception:
+                    logger.warning("drawFrameAxes failed for marker_id=%s", det.marker_id)
+
+            self._storage.save_annotated(sample["frame_idx"], draw)
+
         for det in dets:
             if self._target_ids is not None and det.marker_id not in self._target_ids:
                 continue
@@ -181,7 +252,7 @@ class EdgeAgent:
                     det.marker_id,
                     rvec,
                     tvec,
-                    None,
+                    image_path,
                     length_m=length_m,
                     capture_time=capture_time,
                 )
@@ -192,4 +263,8 @@ class EdgeAgent:
             last_capture_time_ms=sample["capture_time_ms"],
             last_frame_idx=sample["frame_idx"],
             detections=len(dets),
+        )
+        logger.info(
+            "frame=%s dets=%s saved=%s",
+            sample["frame_idx"], len(dets), image_path if image_path else "none",
         )
