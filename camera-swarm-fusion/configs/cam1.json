@@ -1,0 +1,44 @@
+{
+  "camera_name": "cam1",
+  "fps": 30,
+  "width": 1280,
+  "height": 720,
+  "calibration_path": "calib/c920s_1920x1080_simple.yml",
+  "session_root": "data/sessions",
+  "duration_sec": 30.0,
+  "aruco_dict": "4x4_50",
+  "marker_lengths_m": {
+    "1": 0.15,
+    "2": 0.0485,
+    "3": 0.05
+  },
+  "target_ids": [1, 2],
+  "reference_id": 0,
+  "publish": true,
+  "broker_ip": "192.168.1.76",
+  "broker_port": 1883,
+  "device_id": "CameraPi",
+  "client_type": "CAMERA",
+  "no_detect": false,
+  "dry_run": false,
+  "max_frames": null,
+  "save_annotated": true,
+  "save_frames": true,
+  "apply_undistort": false,
+  "lightglue": {
+  "enabled": true,
+  "device": "cpu",
+  "template_dir": "templates/markers/cam1",
+  "debug_save": true,
+  "min_inliers": 4,
+  "match_threshold": 0.2,
+  "max_age_frames": 5,
+  "reacquire_interval_frames": 5,
+  "max_fallback_markers_per_frame": 2,
+  "prefer_roi_matching": true
+},
+  "source": {
+    "type": "rtp_h264_udp",
+    "port": 5000
+  }
+}

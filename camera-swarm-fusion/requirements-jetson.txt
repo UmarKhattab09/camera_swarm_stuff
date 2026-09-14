@@ -1,0 +1,23 @@
+# Requirements for Jetson platforms (ARM64 with CUDA)
+# For LightGlue fallback support on NVIDIA Jetson devices
+
+opencv-python==4.11.0.86
+numpy==1.26.4
+
+# PyTorch for Jetson
+# Note: Install from NVIDIA's pre-built wheels for Jetson
+# See: https://forums.developer.nvidia.com/t/pytorch-for-jetson/72048
+# 
+# Example for JetPack 5.x / PyTorch 2.0:
+# wget https://developer.download.nvidia.com/compute/redist/jp/v512/pytorch/torch-2.0.0+nv23.05-cp38-cp38-linux_aarch64.whl
+# pip3 install torch-2.0.0+nv23.05-cp38-cp38-linux_aarch64.whl
+#
+# Or use pip with CUDA 11.8:
+# pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+
+# LightGlue for feature matching
+# Install after PyTorch is set up:
+# pip install lightglue
+
+# Optional: For YAML config support
+# pyyaml

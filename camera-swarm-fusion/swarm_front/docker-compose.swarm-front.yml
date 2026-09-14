@@ -1,0 +1,37 @@
+# Swarm stack for running camera_fusion.run directly on RPiCamFront.
+#
+# IMPORTANT: RPiCamFront must first join this swarm as a worker node
+# (see setup steps). This service is pinned to that specific node by
+# hostname, since it needs that Pi's physical /dev/video0.
+#
+# privileged: true is required because Docker Swarm services have no
+# equivalent to `docker run --device` -- this is the only way a Swarm
+# service gets access to a host device. It grants broader host access
+# than just the camera; that's a real tradeoff, accepted here because
+# this container is permanently pinned to one Pi anyway.
+#
+# Deploy:   docker stack deploy -c docker-compose.yml front_camera_stack
+# Stop:     docker stack rm front_camera_stack
+# Logs:     docker service logs -f front_camera_stack_front-camera
+
+version: "3.9"
+
+services:
+  front-camera:
+    build:
+      context: ..
+      dockerfile: swarm-front/Dockerfile.swarm-front
+    privileged: true
+    environment:
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ../configs:/app/configs
+      - ../calib:/app/calib
+      - ../data:/app/data
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+      placement:
+        constraints:
+          - node.hostname == RPiCamFront

@@ -1,0 +1,48 @@
+# Swarm stack for camera_edge -- the hardware-agnostic detection/pose/MQTT
+# container. camera_host (the Pi-local hardware service) is NOT part of
+# this stack: it runs outside Swarm entirely, as a systemd service
+# (deploy/systemd/camera-hw.service), because Swarm services cannot be
+# granted device access (devices:, privileged:, and device_cgroup_rules:
+# are all rejected or silently ignored by `docker stack deploy`).
+#
+# Deploy:   docker stack deploy -c swarm.yml camera
+# Stop:     docker stack rm camera
+# Logs:     docker service logs -f camera_camera-edge
+
+services:
+  camera-edge:
+    image: camera-edge:latest
+    deploy:
+      restart_policy:
+        condition: any
+      placement:
+        constraints:
+          - node.labels.camera == true
+    volumes:
+      - type: bind
+        source: /run/camera-hw
+        target: /run/camera-hw
+      - type: bind
+        source: /opt/camera-sensor-fusion/data
+        target: /app/data
+    environment:
+      DEVICE_ID: ${DEVICE_ID:-CameraPi}
+      CAMERA_NAME: ${CAMERA_NAME:-cam1}
+      CAMERA_SOCKET_PATH: ${CAMERA_SOCKET_PATH:-/run/camera-hw/camera.sock}
+      CAMERA_FPS: ${CAMERA_FPS:-15}
+      CAMERA_WIDTH: ${CAMERA_WIDTH:-1920}
+      CAMERA_HEIGHT: ${CAMERA_HEIGHT:-1080}
+      CAMERA_CALIBRATION_PATH: ${CAMERA_CALIBRATION_PATH:-calib/c920s_1920x1080_simple.yml}
+      CAMERA_ARUCO_DICT: ${CAMERA_ARUCO_DICT:-4x4_50}
+      CAMERA_MARKER_LENGTH_M: ${CAMERA_MARKER_LENGTH_M:-0.035}
+      CAMERA_TARGET_IDS: ${CAMERA_TARGET_IDS:-}
+      MQTT_BROKER_IP: ${MQTT_BROKER_IP:-mqtt-broker}
+      MQTT_BROKER_PORT: ${MQTT_BROKER_PORT:-1883}
+      CLIENT_TYPE: ${CLIENT_TYPE:-CAMERA}
+      CAMERA_CSV_PATH: ${CAMERA_CSV_PATH:-/app/data/detections.csv}
+      CAMERA_EDGE_HEALTH_PATH: /tmp/camera-edge-health.json
+    healthcheck:
+      test: ["CMD", "python3", "-m", "camera_edge", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

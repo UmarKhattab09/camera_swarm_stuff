@@ -1,0 +1,23 @@
+__pycache__/
+*.pyc
+.venv/
+.venv-gpu/
+__pycache__/
+*.pyc
+data/sessions/
+*.png
+*.jpg
+*.jpeg
+*.mp4
+*.avi
+*.whl
+*.tar
+*.tar.gz
+*.tgz
+*.xz
+tmp*/
+.venv-system/
+
+# calib/*.yml
+.vscode/
+data/

@@ -1,0 +1,31 @@
+{
+  "camera_name": "cam2_stream",
+  "fps": 15,
+  "width": 1280,
+  "height": 720,
+  "calibration_path": "calib/c920s_1920x1080_simple.yml",
+  "session_root": "data/sessions",
+  "duration_sec": 30.0,
+  "aruco_dict": "4x4_50",
+  "marker_lengths_m": {
+    "1": 0.15,
+    "2": 0.0485,
+    "3": 0.05
+  },
+  "target_ids": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "reference_id": 0,
+  "no_detect": false,
+  "dry_run": false,
+  "max_frames": null,
+  "save_annotated": true,
+  "save_frames": true,
+  "source": {
+    "type": "rtp_h264_udp",
+    "port": 5002
+  }
+}

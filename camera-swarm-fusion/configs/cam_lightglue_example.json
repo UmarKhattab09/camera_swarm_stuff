@@ -1,0 +1,31 @@
+{
+  "camera_name": "cam1_lightglue",
+  "device": 0,
+  "fps": 15,
+  "width": 1920,
+  "height": 1080,
+  "calibration_path": "calib/c920s_1920x1080_simple.yml",
+  "session_root": "data/sessions",
+  "duration_sec": 30.0,
+  "aruco_dict": "4x4_50",
+  "marker_length_m": 0.035,
+  "target_ids": [0, 1, 2, 3],
+  "reference_id": 0,
+  "save_annotated": true,
+  "save_frames": true,
+  "lightglue": {
+    "enabled": true,
+    "device": "cpu",
+    "template_dir": "templates/markers/cam1",
+    "min_inliers": 4,
+    "max_age_frames": 5,
+    "roi_expand_px": 50,
+    "debug_save": true,
+    "corner_refine": true,
+    "match_threshold": 0.2,
+    "verify_id": true,
+    "max_fallback_markers_per_frame": 2,
+    "reacquire_interval_frames": 5,
+    "prefer_roi_matching": true
+  }
+}

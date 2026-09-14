@@ -1,0 +1,14 @@
+opencv-python
+numpy
+facade-sdk==0.4.3
+# If ArUco isn't available, install:
+# opencv-contrib-python
+
+# Optional: LightGlue fallback for robust marker recovery
+# Install PyTorch first (CPU or CUDA version):
+# pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+# OR for CUDA 11.8:
+# pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+#
+# Then install LightGlue:
+# pip install lightglue

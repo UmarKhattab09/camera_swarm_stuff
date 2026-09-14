@@ -1,0 +1,16 @@
+{
+  "camera_name": "front",
+  "device": 0,
+  "width": 1920,
+  "height": 1080,
+  "fps": 30,
+  "marker_length_m": 0.0485,
+  "calibration_path": "calib/PLACEHOLDER_front_1920x1080.yml",
+  "apply_undistort": false,
+  "no_detect": false,
+  "publish": true,
+  "broker_ip": "192.168.2.100",
+  "broker_port": 1883,
+  "device_id": "CameraPi",
+  "client_type": "CAMERA"
+}

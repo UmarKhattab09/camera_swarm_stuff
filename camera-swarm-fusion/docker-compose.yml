@@ -1,0 +1,29 @@
+# Local (non-Swarm) testing for camera_edge. Requires camera_host to
+# already be running on this machine (`python -m camera_host`) so that
+# /run/camera-hw/camera.sock exists before this container starts.
+
+services:
+  camera-edge:
+    build:
+      context: .
+      dockerfile: camera_edge/Dockerfile
+    container_name: camera-edge
+    volumes:
+      - ./data:/app/data
+      - /run/camera-hw:/run/camera-hw
+    environment:
+      DEVICE_ID: ${DEVICE_ID:-CameraPi}
+      CAMERA_NAME: ${CAMERA_NAME:-cam1}
+      CAMERA_SOCKET_PATH: ${CAMERA_SOCKET_PATH:-/run/camera-hw/camera.sock}
+      CAMERA_FPS: ${CAMERA_FPS:-15}
+      CAMERA_WIDTH: ${CAMERA_WIDTH:-1920}
+      CAMERA_HEIGHT: ${CAMERA_HEIGHT:-1080}
+      CAMERA_CALIBRATION_PATH: ${CAMERA_CALIBRATION_PATH:-calib/c920s_1920x1080_simple.yml}
+      CAMERA_ARUCO_DICT: ${CAMERA_ARUCO_DICT:-4x4_50}
+      CAMERA_MARKER_LENGTH_M: ${CAMERA_MARKER_LENGTH_M:-0.035}
+      MQTT_BROKER_IP: ${MQTT_BROKER_IP:-127.0.0.1}
+      MQTT_BROKER_PORT: ${MQTT_BROKER_PORT:-1883}
+      CLIENT_TYPE: ${CLIENT_TYPE:-CAMERA}
+      CAMERA_CSV_PATH: ${CAMERA_CSV_PATH:-/app/data/detections.csv}
+    restart: unless-stopped
+    command: ["python3", "-m", "camera_edge"]

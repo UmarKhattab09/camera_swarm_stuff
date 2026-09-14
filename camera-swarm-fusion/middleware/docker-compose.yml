@@ -1,0 +1,21 @@
+# Docker Compose stack for the middleware fusion service.
+# Run these commands from the middleware/ directory.
+version: "3.9"
+
+services:
+  fusion:
+    container_name: camera_fusion_middleware
+    build:
+      context: ..
+      dockerfile: middleware/Dockerfile
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ../configs:/app/configs
+      - ../calib:/app/calib
+      - ../templates:/app/templates:ro
+      - ../data:/app/data
+      - ../logs:/app/logs
+    command: python3 -m camera_fusion.launch configs/cam1.json configs/cam2.json

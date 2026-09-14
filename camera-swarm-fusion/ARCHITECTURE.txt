@@ -1,0 +1,298 @@
+"""
+LightGlue Fallback Architecture Diagram
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         CAMERA WORKER MAIN LOOP                          │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+                        ┌───────────────────────┐
+                        │   Capture Frame (BGR) │
+                        └───────────────────────┘
+                                    │
+                                    ▼
+                        ┌───────────────────────┐
+                        │   Undistort Frame     │
+                        └───────────────────────┘
+                                    │
+┌───────────────────────────────────┼───────────────────────────────────┐
+│                DETECTION PIPELINE WITH LIGHTGLUE FALLBACK              │
+│                                   │                                    │
+│                                   ▼                                    │
+│               ┌──────────────────────────────────────┐                │
+│               │  STEP 1: ArUco Detection             │                │
+│               │  - cv2.aruco.detectMarkers()         │                │
+│               │  - Returns: detected_dict            │                │
+│               │    {marker_id -> corners (4,2)}      │                │
+│               └──────────────────────────────────────┘                │
+│                                   │                                    │
+│                                   ▼                                    │
+│               ┌──────────────────────────────────────┐                │
+│               │  STEP 2: Compute Missing IDs         │                │
+│               │  missing = expected - detected       │                │
+│               └──────────────────────────────────────┘                │
+│                                   │                                    │
+│                         ┌─────────┴─────────┐                         │
+│                         │  missing_ids?     │                         │
+│                         └─────────┬─────────┘                         │
+│                                   │                                    │
+│                    ┌──────────────┼──────────────┐                    │
+│                    │ No                          │ Yes                │
+│                    ▼                             ▼                     │
+│          ┌──────────────────┐    ┌──────────────────────────────────┐│
+│          │  Skip Fallback   │    │  STEP 3: LightGlue Fallback      ││
+│          └──────────────────┘    │  (if enabled)                     ││
+│                    │              │                                   ││
+│                    │              │  ┌─────────────────────────────┐ ││
+│                    │              │  │ For each missing_id:        │ ││
+│                    │              │  │                             │ ││
+│                    │              │  │ Was recently seen?          │ ││
+│                    │              │  │   ├─ Yes: Try TRACKING      │ ││
+│                    │              │  │   │   (optical flow in ROI) │ ││
+│                    │              │  │   │   • 10-30ms             │ ││
+│                    │              │  │   │                         │ ││
+│                    │              │  │   └─ Fail or too old:       │ ││
+│                    │              │  │       Try RE-ACQUISITION    │ ││
+│                    │              │  │       (template matching)   │ ││
+│                    │              │  │       • SuperPoint features │ ││
+│                    │              │  │       • LightGlue matching  │ ││
+│                    │              │  │       • Homography + RANSAC │ ││
+│                    │              │  │       • 100-500ms (CPU)     │ ││
+│                    │              │  │       • 20-100ms (CUDA)     │ ││
+│                    │              │  │                             │ ││
+│                    │              │  │ If successful:              │ ││
+│                    │              │  │   • Project template corners│ ││
+│                    │              │  │   • Refine with cornerSubPix│ ││
+│                    │              │  │   • Add to detected_dict    │ ││
+│                    │              │  │   • Update tracker_state    │ ││
+│                    │              │  └─────────────────────────────┘ ││
+│                    │              └──────────────────────────────────┘│
+│                    │                             │                     │
+│                    └─────────────┬───────────────┘                     │
+│                                  ▼                                     │
+│               ┌──────────────────────────────────────┐                │
+│               │  STEP 4: Rebuild Detection List     │                │
+│               │  dets = [Detection(id, corners)]    │                │
+│               │  (includes ArUco + recovered)       │                │
+│               └──────────────────────────────────────┘                │
+│                                   │                                    │
+└───────────────────────────────────┼───────────────────────────────────┘
+                                    ▼
+                        ┌───────────────────────┐
+                        │   PnP Pose Estimation │
+                        │   (unchanged)         │
+                        └───────────────────────┘
+                                    │
+                                    ▼
+                        ┌───────────────────────┐
+                        │   Visualization       │
+                        │   - Green: ArUco      │
+                        │   - Cyan: Tracked     │
+                        │   - Magenta: Reacquire│
+                        └───────────────────────┘
+                                    │
+                                    ▼
+                        ┌───────────────────────┐
+                        │   Save Outputs        │
+                        │   - Frames            │
+                        │   - CSV detections    │
+                        │   - Debug frames      │
+                        └───────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════
+
+                         LIGHTGLUE FALLBACK CLASS
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                          LightGlueFallback                               │
+├─────────────────────────────────────────────────────────────────────────┤
+│  State:                                                                  │
+│    • superpoint: SuperPoint model                                       │
+│    • lightglue: LightGlue model                                         │
+│    • templates: Dict[marker_id -> (img, kpts, desc, corners)]          │
+│    • tracker_states: Dict[marker_id -> TrackerState]                   │
+│    • current_frame_index: int                                           │
+│                                                                          │
+│  Methods:                                                                │
+│    recover_missing(frame, detected_dict, expected_ids)                 │
+│    └─→ Returns: (updated_dict, debug_info)                             │
+│                                                                          │
+│    _recover_marker(marker_id, frame_gray, frame_bgr)                   │
+│    ├─→ _track_marker()        [Fast: optical flow]                     │
+│    └─→ _reacquire_from_template() [Robust: feature matching]           │
+│                                                                          │
+│    _load_templates()                                                     │
+│    └─→ Precompute SuperPoint features for all templates                │
+├─────────────────────────────────────────────────────────────────────────┤
+│  TrackerState (per marker):                                             │
+│    • marker_id: int                                                     │
+│    • last_corners: ndarray (4,2)                                        │
+│    • last_seen_frame_index: int                                         │
+│    • last_frame_gray: ndarray                                           │
+├─────────────────────────────────────────────────────────────────────────┤
+│  DebugInfo (per recovery):                                              │
+│    • marker_id: int                                                     │
+│    • source: "aruco" | "lightglue_track" | "lightglue_reacquire"       │
+│    • inliers: int                                                       │
+│    • match_quality: float                                               │
+│    • homography: ndarray (optional)                                     │
+└─────────────────────────────────────────────────────────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════
+
+                         RECOVERY DECISION TREE
+
+                        ┌─────────────────────┐
+                        │  Missing Marker ID  │
+                        └──────────┬──────────┘
+                                   │
+                    ┌──────────────┴──────────────┐
+                    │                             │
+                    ▼                             ▼
+        ┌──────────────────────┐      ┌──────────────────────┐
+        │ In tracker_states?   │      │ Not in tracker_states│
+        │ age < max_age_frames?│      │ (never seen before)  │
+        └──────────┬───────────┘      └──────────┬───────────┘
+                   │                              │
+         ┌─────────┴─────────┐                   │
+         │ Yes              │ No                 │
+         ▼                   ▼                    │
+    ┌─────────┐      ┌──────────────┐           │
+    │ TRACK   │      │ REACQUIRE    │←──────────┘
+    │         │      │              │
+    │ 1. ROI  │      │ 1. Extract   │
+    │    expand│      │    frame     │
+    │         │      │    features  │
+    │ 2. Optical│    │              │
+    │    flow  │      │ 2. Match     │
+    │         │      │    template  │
+    │ 3. Refine│     │    features  │
+    └────┬────┘      │              │
+         │           │ 3. Homography│
+         │           │    RANSAC    │
+         │           │              │
+         │           │ 4. Check     │
+         │           │    inliers   │
+         │           │              │
+         │           │ 5. Project   │
+         │           │    corners   │
+         │           │              │
+         │           │ 6. Refine    │
+         │           └─────┬────────┘
+         │                 │
+         └────────┬────────┘
+                  ▼
+         ┌────────────────┐
+         │ Success?       │
+         └────┬───────┬───┘
+              │       │
+         Yes  │       │ No
+              │       │
+              ▼       ▼
+      ┌────────────┐ ┌────────────┐
+      │ Update     │ │ Log fail   │
+      │ tracker    │ │ Return None│
+      │ Return     │ └────────────┘
+      │ corners    │
+      └────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════
+
+                         DATA FLOW DIAGRAM
+
+Input Frame (BGR)                  Expected IDs: {0, 1, 2, 3}
+     │
+     ├─→ ArUco Detector
+     │      └─→ detected_dict = {0: corners0, 2: corners2}
+     │
+     ├─→ Missing IDs = {1, 3}
+     │
+     └─→ LightGlue Fallback
+            │
+            ├─→ Marker ID 1:
+            │      └─→ tracker_states[1] exists, age=2 < 5
+            │             └─→ TRACKING successful
+            │                    └─→ recovered corners1
+            │
+            └─→ Marker ID 3:
+                   └─→ tracker_states[3] exists, age=8 > 5
+                          └─→ TRACKING skipped (too old)
+                                 └─→ REACQUIRE from template
+                                        ├─→ Match: 42 points
+                                        ├─→ Homography: 38 inliers
+                                        ├─→ inliers >= min_inliers (4) ✓
+                                        └─→ recovered corners3
+
+Updated detected_dict = {
+    0: corners0 (ArUco),
+    1: corners1 (LightGlue tracking),
+    2: corners2 (ArUco),
+    3: corners3 (LightGlue reacquire)
+}
+
+Debug Info = [
+    {marker_id: 0, source: "aruco", ...},
+    {marker_id: 1, source: "lightglue_track", inliers: 4, ...},
+    {marker_id: 2, source: "aruco", ...},
+    {marker_id: 3, source: "lightglue_reacquire", inliers: 38, ...}
+]
+
+     │
+     ▼
+Visualization (color-coded):
+     • ID 0: Green (ArUco)
+     • ID 1: Cyan (LG:track)
+     • ID 2: Green (ArUco)
+     • ID 3: Magenta (LG:reacquire)
+
+
+═══════════════════════════════════════════════════════════════════════════
+
+                         CONFIGURATION FLOW
+
+config.json:
+{
+  "lightglue": {
+    "enabled": true,
+    "device": "cpu",
+    "template_dir": "templates/markers",
+    "min_inliers": 4,
+    "max_age_frames": 5,
+    "roi_expand_px": 50,
+    "debug_save": true,
+    "corner_refine": true,
+    "match_threshold": 0.2
+  }
+}
+     │
+     ▼
+load_config()
+     │
+     ▼
+CameraConfig.lightglue = LightGlueConfig(...)
+     │
+     ▼
+CameraWorker.__init__()
+     │
+     ▼
+if config.lightglue and config.lightglue.enabled:
+    fallback = LightGlueFallback(config.lightglue, aruco_dict)
+     │
+     ▼
+fallback._load_templates()
+     ├─→ Load id_0.png → extract SuperPoint features
+     ├─→ Load id_1.png → extract SuperPoint features
+     ├─→ Load id_2.png → extract SuperPoint features
+     └─→ Load id_3.png → extract SuperPoint features
+     │
+     ▼
+Ready for recovery in main loop
+
+
+═══════════════════════════════════════════════════════════════════════════
+
+End of Architecture Diagram
+"""
